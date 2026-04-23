@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Investor Report Analyzer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] } } }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    .drag-active { border-color: #6366f1 !important; background: rgba(99,102,241,0.06); }
+    .metric-card  { min-width: 148px; }
+    @keyframes pulse-soft { 0%,100%{opacity:1} 50%{opacity:.45} }
+    .pulsing { animation: pulse-soft 1.8s ease-in-out infinite; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .fade-up { animation: fadeUp 0.35s ease both; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="sticky top-0 z-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm select-none">IR</div>
+    <div>
+      <h1 class="font-semibold text-slate-900 dark:text-slate-100 leading-none">Investor Report Analyzer</h1>
+      <p class="text-xs text-slate-400 dark:text-slate-600 mt-0.5">Extract insights from earnings reports, 10-Ks, and investor letters</p>
+    </div>
+  </div>
+  <button id="themeToggle" class="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-500" title="Toggle dark mode">🌙</button>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 py-8 space-y-5">
+
+  <!-- ── Config ──────────────────────────────────────────────────────────── -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+    <div class="flex flex-col sm:flex-row gap-4 items-end">
+      <div class="flex-1 min-w-0">
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Anthropic API Key</label>
+        <div class="relative">
+          <input id="apiKey" type="password" placeholder="sk-ant-api03-…"
+            autocomplete="off" spellcheck="false"
+            class="w-full font-mono text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 pr-10 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder-slate-300 dark:placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <button id="toggleKeyVis" tabindex="-1"
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors text-sm select-none" title="Show/hide key">👁</button>
+        </div>
+        <p class="mt-1.5 text-xs text-slate-400">Stored only in your browser's localStorage — never sent anywhere except the Anthropic API.</p>
+      </div>
+      <div class="w-full sm:w-52">
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Model</label>
+        <select id="modelSelect"
+          class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fast &amp; cheap</option>
+          <option value="claude-sonnet-4-6" selected>Sonnet 4.6 — best quality</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Upload zone ─────────────────────────────────────────────────────── -->
+  <div id="uploadArea"
+    class="bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 p-14 text-center cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-600 transition-colors"
+    onclick="document.getElementById('fileInput').click()"
+    ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+    <input id="fileInput" type="file" accept=".pdf" class="hidden" onchange="onFileSelect(event)" />
+    <div class="text-5xl mb-4 select-none">📄</div>
+    <p class="font-semibold text-slate-700 dark:text-slate-300 text-lg mb-1">Drop your investor report PDF here</p>
+    <p class="text-sm text-slate-400">Earnings releases · Annual reports · 10-Ks · 10-Qs · Shareholder letters</p>
+  </div>
+
+  <!-- ── File info bar ────────────────────────────────────────────────────── -->
+  <div id="fileInfoBar" class="hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 px-5 py-4 flex items-center justify-between gap-4 fade-up">
+    <div class="flex items-center gap-3 min-w-0">
+      <span class="text-2xl flex-shrink-0">📄</span>
+      <div class="min-w-0">
+        <p id="fileName" class="font-medium text-slate-800 dark:text-slate-200 text-sm truncate"></p>
+        <p id="fileStats" class="text-xs text-slate-400 mt-0.5"></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 flex-shrink-0">
+      <button id="analyzeBtn"
+        class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        onclick="runAnalysis()">
+        Analyze
+      </button>
+      <button onclick="resetToUpload()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors font-medium text-lg leading-none" title="Remove file">✕</button>
+    </div>
+  </div>
+
+  <!-- ── Loading ──────────────────────────────────────────────────────────── -->
+  <div id="loadingSection" class="hidden">
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-14 text-center">
+      <div class="pulsing inline-flex w-16 h-16 rounded-full bg-indigo-50 dark:bg-indigo-900/30 items-center justify-center text-3xl mb-5">🔍</div>
+      <p id="loadingMsg" class="font-semibold text-slate-700 dark:text-slate-300 text-base mb-1">Extracting text from PDF…</p>
+      <p class="text-sm text-slate-400">Large documents may take a moment</p>
+    </div>
+  </div>
+
+  <!-- ── Error ────────────────────────────────────────────────────────────── -->
+  <div id="errorSection" class="hidden fade-up">
+    <div class="bg-red-50 dark:bg-red-950/30 rounded-2xl border border-red-200 dark:border-red-800 p-6 flex gap-4">
+      <span class="text-red-500 text-xl flex-shrink-0">⚠</span>
+      <div>
+        <p class="font-semibold text-red-700 dark:text-red-400">Analysis failed</p>
+        <p id="errorMsg" class="text-sm text-red-600 dark:text-red-500 mt-1 leading-relaxed"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Results ──────────────────────────────────────────────────────────── -->
+  <div id="resultsSection" class="hidden space-y-5 fade-up">
+
+    <!-- Company header -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <h2 id="companyName" class="text-2xl font-bold text-slate-900 dark:text-slate-100 leading-tight"></h2>
+          <p id="reportMeta" class="text-sm text-slate-500 dark:text-slate-400 mt-1"></p>
+        </div>
+        <span id="sentimentBadge" class="flex-shrink-0 px-3 py-1 rounded-full text-sm font-semibold"></span>
+      </div>
+    </div>
+
+    <!-- Key metrics -->
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 px-1">Key Metrics</p>
+      <div id="metricsRow" class="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1"></div>
+    </div>
+
+    <!-- Executive summary -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Executive Summary</p>
+      <p id="summaryText" class="text-slate-700 dark:text-slate-300 leading-relaxed text-[15px]"></p>
+    </div>
+
+    <!-- Key takeaways -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+      <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">Key Takeaways</p>
+      <ol id="takeawaysList" class="space-y-3"></ol>
+    </div>
+
+    <!-- Risks & Opportunities -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+        <p class="text-xs font-semibold uppercase tracking-wider text-red-500 mb-4">Risks &amp; Headwinds</p>
+        <ul id="risksList" class="space-y-3"></ul>
+      </div>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
+        <p class="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-500 mb-4">Opportunities &amp; Tailwinds</p>
+        <ul id="oppList" class="space-y-3"></ul>
+      </div>
+    </div>
+
+    <!-- Outlook -->
+    <div class="bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-200 dark:border-indigo-900 p-6">
+      <p class="text-xs font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-3">Outlook &amp; Guidance</p>
+      <p id="outlookText" class="text-slate-700 dark:text-slate-300 leading-relaxed text-[15px]"></p>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="flex items-center justify-between pt-1">
+      <button onclick="resetToUpload()"
+        class="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+        ← Analyze another report
+      </button>
+      <button onclick="copyResults()"
+        class="text-sm px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors font-medium">
+        Copy Summary
+      </button>
+    </div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div id="toast"
+  class="fixed bottom-6 right-6 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-sm font-medium shadow-xl opacity-0 pointer-events-none transition-opacity duration-200 z-50 max-w-xs"></div>
+
+<!-- ── Scripts ──────────────────────────────────────────────────────────────── -->
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let currentFile     = null;
+let currentAnalysis = null;
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(function init() {
+  const key   = localStorage.getItem('ira_apikey');
+  const model = localStorage.getItem('ira_model');
+  const theme = localStorage.getItem('ira_theme');
+
+  if (key)   document.getElementById('apiKey').value = key;
+  if (model) document.getElementById('modelSelect').value = model;
+
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (theme === 'dark' || (!theme && prefersDark)) setDark(true);
+
+  document.getElementById('apiKey').addEventListener('blur', () => {
+    localStorage.setItem('ira_apikey', document.getElementById('apiKey').value);
+  });
+  document.getElementById('modelSelect').addEventListener('change', () => {
+    localStorage.setItem('ira_model', document.getElementById('modelSelect').value);
+  });
+})();
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+function setDark(on) {
+  document.documentElement.classList.toggle('dark', on);
+  document.getElementById('themeToggle').textContent = on ? '☀️' : '🌙';
+}
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const on = !document.documentElement.classList.contains('dark');
+  setDark(on);
+  localStorage.setItem('ira_theme', on ? 'dark' : 'light');
+});
+
+document.getElementById('toggleKeyVis').addEventListener('click', () => {
+  const el = document.getElementById('apiKey');
+  el.type = el.type === 'password' ? 'text' : 'password';
+});
+
+// ─── Drag & drop ──────────────────────────────────────────────────────────────
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('uploadArea').classList.add('drag-active');
+}
+function onDragLeave() {
+  document.getElementById('uploadArea').classList.remove('drag-active');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadArea').classList.remove('drag-active');
+  const f = e.dataTransfer.files[0];
+  if (f?.type === 'application/pdf') loadFile(f);
+  else toast('Please drop a PDF file');
+}
+function onFileSelect(e) {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+}
+
+function loadFile(file) {
+  currentFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileStats').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+  show('fileInfoBar'); hide('uploadArea');
+  clearState();
+}
+
+function resetToUpload() {
+  currentFile = null;
+  currentAnalysis = null;
+  document.getElementById('fileInput').value = '';
+  show('uploadArea'); hide('fileInfoBar');
+  clearState();
+}
+
+function clearState() {
+  hide('loadingSection'); hide('errorSection'); hide('resultsSection');
+}
+
+// ─── PDF extraction ───────────────────────────────────────────────────────────
+async function extractPdfText(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page    = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const pageStr = content.items.map(i => i.str).join(' ').replace(/\s+/g, ' ');
+    text += `\n\n--- Page ${p} ---\n${pageStr}`;
+  }
+  return { text: text.trim(), numPages: pdf.numPages };
+}
+
+// ─── Claude API ────────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT =
+  `You are a senior financial analyst specializing in earnings reports and investor materials. ` +
+  `When given investor report text, extract key data and return it as a single valid JSON object. ` +
+  `Return ONLY the raw JSON — no markdown fences, no explanation, no preamble.`;
+
+function buildPrompt(text) {
+  const MAX = 100000;
+  const body = text.length > MAX ? text.slice(0, MAX) + '\n[... truncated for length ...]' : text;
+  return `Analyze the following investor report and return a JSON object with exactly these fields:
+
+{
+  "company":     "string — company or fund name",
+  "period":      "string — reporting period, e.g. Q3 FY2024 or Full Year 2023",
+  "reportType":  "string — e.g. Earnings Release, Annual Report, 10-Q, Shareholder Letter",
+  "summary":     "string — 2-3 sentence executive summary of performance",
+  "sentiment":   "positive | negative | neutral | mixed",
+  "metrics": [
+    {
+      "name":      "string — e.g. Revenue, EPS, Gross Margin, Free Cash Flow",
+      "value":     "string — value with units, e.g. $5.2B, 42.3%, $2.14",
+      "change":    "string or null — vs prior period, e.g. +8.3% YoY, -120bps QoQ",
+      "direction": "up | down | flat | null"
+    }
+  ],
+  "takeaways":     ["string", ...],
+  "risks":         ["string", ...],
+  "opportunities": ["string", ...],
+  "outlook":       "string — forward guidance and management commentary on the future"
+}
+
+Rules:
+- metrics: 6-10 of the most important financial metrics found in the report
+- takeaways: 5-7 most important facts, developments, or narrative points
+- risks: 3-5 key risks, challenges, or headwinds mentioned or implied
+- opportunities: 3-5 growth opportunities or tailwinds
+- Use specific numbers from the text wherever possible
+
+Report text:
+${body}`;
+}
+
+async function callClaude(text, apiKey, model) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: buildPrompt(text) }],
+    }),
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { msg = (await res.json()).error?.message || msg; } catch {}
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+function parseJSON(raw) {
+  // Strip optional markdown fences
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const start = stripped.indexOf('{');
+  const end   = stripped.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('Response did not contain a JSON object. Try a different model or re-run.');
+  return JSON.parse(stripped.slice(start, end + 1));
+}
+
+// ─── Main flow ────────────────────────────────────────────────────────────────
+async function runAnalysis() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey)      { toast('Enter your Anthropic API key first'); return; }
+  if (!currentFile) { toast('No file selected'); return; }
+
+  const model = document.getElementById('modelSelect').value;
+  localStorage.setItem('ira_apikey', apiKey);
+
+  clearState();
+  show('loadingSection');
+  document.getElementById('analyzeBtn').disabled = true;
+
+  try {
+    setLoadingMsg('Extracting text from PDF…');
+    const { text, numPages } = await extractPdfText(currentFile);
+
+    if (!text.trim()) throw new Error(
+      'No text could be extracted — this PDF may be image-based or scanned. ' +
+      'Try a digitally-created PDF instead.'
+    );
+
+    document.getElementById('fileStats').textContent =
+      `${(currentFile.size / 1024).toFixed(0)} KB · ${numPages} page${numPages !== 1 ? 's' : ''} · ${text.length.toLocaleString()} chars`;
+
+    setLoadingMsg('Analyzing with Claude…');
+    const raw      = await callClaude(text, apiKey, model);
+    const analysis = parseJSON(raw);
+    currentAnalysis = analysis;
+
+    hide('loadingSection');
+    renderResults(analysis);
+
+  } catch (err) {
+    hide('loadingSection');
+    show('errorSection');
+    document.getElementById('errorMsg').textContent = err.message;
+    console.error(err);
+  } finally {
+    document.getElementById('analyzeBtn').disabled = false;
+  }
+}
+
+function setLoadingMsg(msg) {
+  document.getElementById('loadingMsg').textContent = msg;
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+const SENTIMENT = {
+  positive: { cls: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400', label: '↑ Positive' },
+  negative: { cls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',                label: '↓ Negative' },
+  neutral:  { cls: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400',           label: '→ Neutral'  },
+  mixed:    { cls: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',        label: '↕ Mixed'    },
+};
+
+function renderMetric(m) {
+  const dir = (m.direction || '').toLowerCase();
+  const clr = dir === 'up'   ? 'text-emerald-600 dark:text-emerald-400'
+            : dir === 'down' ? 'text-red-500 dark:text-red-400'
+            :                  'text-slate-500 dark:text-slate-400';
+  const arrow = dir === 'up' ? '↑ ' : dir === 'down' ? '↓ ' : '';
+  return `<div class="metric-card flex-shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+    <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 truncate">${esc(m.name)}</p>
+    <p class="text-xl font-bold text-slate-900 dark:text-slate-100 leading-tight">${esc(m.value)}</p>
+    ${m.change ? `<p class="text-xs mt-1 ${clr}">${arrow}${esc(m.change)}</p>` : ''}
+  </div>`;
+}
+
+function renderBullet(text, dotColor) {
+  return `<li class="flex gap-2.5 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed">
+    <span class="${dotColor} flex-shrink-0 mt-[5px] text-[8px]">●</span>${esc(text)}
+  </li>`;
+}
+
+function renderResults(a) {
+  // Header
+  document.getElementById('companyName').textContent = a.company || '—';
+  document.getElementById('reportMeta').textContent  = [a.period, a.reportType].filter(Boolean).join(' · ');
+
+  const s = SENTIMENT[(a.sentiment || 'neutral').toLowerCase()] || SENTIMENT.neutral;
+  const badge = document.getElementById('sentimentBadge');
+  badge.textContent = s.label;
+  badge.className   = `flex-shrink-0 px-3 py-1 rounded-full text-sm font-semibold ${s.cls}`;
+
+  // Metrics
+  document.getElementById('metricsRow').innerHTML =
+    (a.metrics || []).map(renderMetric).join('');
+
+  // Summary
+  document.getElementById('summaryText').textContent = a.summary || '';
+
+  // Takeaways
+  document.getElementById('takeawaysList').innerHTML =
+    (a.takeaways || []).map((t, i) =>
+      `<li class="flex gap-3">
+        <span class="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center justify-center select-none">${i + 1}</span>
+        <span class="text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed pt-0.5">${esc(t)}</span>
+      </li>`
+    ).join('');
+
+  // Risks & Opportunities
+  document.getElementById('risksList').innerHTML =
+    (a.risks || []).map(r => renderBullet(r, 'text-red-400')).join('');
+  document.getElementById('oppList').innerHTML =
+    (a.opportunities || []).map(o => renderBullet(o, 'text-emerald-500')).join('');
+
+  // Outlook
+  document.getElementById('outlookText').textContent = a.outlook || '';
+
+  show('resultsSection');
+  document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ─── Copy ─────────────────────────────────────────────────────────────────────
+function copyResults() {
+  if (!currentAnalysis) return;
+  const a = currentAnalysis;
+  const lines = [
+    `${a.company} — ${a.period}`,
+    `Report: ${a.reportType}   Sentiment: ${a.sentiment}`,
+    '',
+    '── KEY METRICS ──',
+    ...(a.metrics || []).map(m => `  ${m.name}: ${m.value}${m.change ? `  (${m.change})` : ''}`),
+    '',
+    '── EXECUTIVE SUMMARY ──',
+    a.summary,
+    '',
+    '── KEY TAKEAWAYS ──',
+    ...(a.takeaways || []).map((t, i) => `  ${i + 1}. ${t}`),
+    '',
+    '── RISKS ──',
+    ...(a.risks || []).map(r => `  • ${r}`),
+    '',
+    '── OPPORTUNITIES ──',
+    ...(a.opportunities || []).map(o => `  • ${o}`),
+    '',
+    '── OUTLOOK ──',
+    a.outlook,
+  ];
+  navigator.clipboard.writeText(lines.join('\n'))
+    .then(() => toast('Summary copied to clipboard'));
+}
+
+// ─── Utilities ─────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function show(id) { document.getElementById(id).classList.remove('hidden'); }
+function hide(id) { document.getElementById(id).classList.add('hidden'); }
+
+let _toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2800);
+}
+</script>
+</body>
+</html>
