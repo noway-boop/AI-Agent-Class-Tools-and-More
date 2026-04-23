@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Prompt Builder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'] },
+        }
+      }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    textarea { resize: vertical; }
+    .token-bar { transition: width 0.3s ease; }
+    .fade-in { animation: fadeIn 0.15s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    .var-highlight { background: rgba(139, 92, 246, 0.15); border-radius: 3px; padding: 0 2px; color: #7c3aed; }
+    .dark .var-highlight { color: #c4b5fd; background: rgba(139, 92, 246, 0.25); }
+    .missing-var { background: rgba(239, 68, 68, 0.15); border-radius: 3px; padding: 0 2px; color: #dc2626; }
+    .dark .missing-var { color: #fca5a5; background: rgba(239, 68, 68, 0.2); }
+  </style>
+</head>
+<body class="h-full bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-200">
+
+<div class="min-h-full flex flex-col">
+
+  <!-- Header -->
+  <header class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 py-3 flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center text-white font-bold text-sm">P</div>
+      <h1 class="font-semibold text-gray-900 dark:text-gray-100 text-lg">AI Prompt Builder</h1>
+      <span class="text-xs text-gray-400 dark:text-gray-600 hidden sm:block">for AI Agent Class</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <!-- Template Selector -->
+      <select id="templateSelect"
+        class="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer">
+        <option value="">Load template…</option>
+        <option value="rag">RAG Q&amp;A Agent</option>
+        <option value="classifier">Intent Classifier</option>
+        <option value="extractor">Data Extractor</option>
+        <option value="cot">Chain-of-Thought Reasoner</option>
+      </select>
+      <!-- Save button -->
+      <button id="saveBtn"
+        class="text-sm px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+        Save
+      </button>
+      <!-- Dark mode toggle -->
+      <button id="themeToggle"
+        class="w-8 h-8 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        title="Toggle dark mode">
+        <span id="themeIcon">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main 3-column layout -->
+  <div class="flex-1 flex flex-col lg:flex-row gap-0 overflow-hidden">
+
+    <!-- Left column: Inputs -->
+    <div class="flex-1 flex flex-col gap-0 min-w-0 border-r border-gray-200 dark:border-gray-800">
+
+      <!-- System Prompt -->
+      <div class="flex flex-col flex-1 p-4 border-b border-gray-200 dark:border-gray-800">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">System Prompt</label>
+          <span id="sysTokens" class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">0 tokens</span>
+        </div>
+        <textarea id="systemPrompt" rows="8"
+          placeholder="You are a helpful assistant. Use {{context}} to answer the question…"
+          class="flex-1 w-full font-mono text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:focus:ring-violet-600 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 transition-colors"></textarea>
+      </div>
+
+      <!-- User Message -->
+      <div class="flex flex-col p-4">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">User Message</label>
+          <span id="userTokens" class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">0 tokens</span>
+        </div>
+        <textarea id="userMessage" rows="5"
+          placeholder="What is {{topic}}?"
+          class="w-full font-mono text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:focus:ring-violet-600 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 transition-colors"></textarea>
+      </div>
+    </div>
+
+    <!-- Middle column: Variables -->
+    <div class="w-full lg:w-64 flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+        <label class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Variables</label>
+        <button id="addVarBtn"
+          class="text-xs px-2 py-1 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors font-medium">
+          + Add
+        </button>
+      </div>
+      <div id="variablesList" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+      <div id="detectedVars" class="p-4 border-t border-gray-200 dark:border-gray-800">
+        <p class="text-xs text-gray-400 dark:text-gray-600 mb-2 font-medium">Detected in prompt</p>
+        <div id="detectedVarTags" class="flex flex-wrap gap-1.5"></div>
+      </div>
+    </div>
+
+    <!-- Right column: Preview -->
+    <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+        <label class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Compiled Preview</label>
+        <div class="flex items-center gap-2">
+          <span id="totalTokens" class="text-xs font-medium text-violet-600 dark:text-violet-400 tabular-nums">0 tokens</span>
+          <button id="copyBtn"
+            class="text-xs px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors font-medium">
+            Copy
+          </button>
+        </div>
+      </div>
+
+      <!-- Token progress bar -->
+      <div class="px-4 pt-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-gray-400 dark:text-gray-600">Context usage</span>
+          <span id="tokenPct" class="text-xs text-gray-400 dark:text-gray-600 tabular-nums">0%</span>
+        </div>
+        <div class="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+          <div id="tokenBar" class="token-bar h-full rounded-full bg-violet-500" style="width: 0%"></div>
+        </div>
+        <div class="flex justify-between text-xs text-gray-300 dark:text-gray-700 mt-0.5">
+          <span>0</span>
+          <span id="contextLimit">200k</span>
+        </div>
+      </div>
+
+      <!-- Preview panels -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-sm">
+        <!-- System block -->
+        <div>
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">system</span>
+          </div>
+          <div id="previewSystem"
+            class="min-h-[60px] bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
+            <span class="text-gray-300 dark:text-gray-700 not-italic font-sans text-xs">No system prompt yet…</span>
+          </div>
+        </div>
+        <!-- User block -->
+        <div>
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400">user</span>
+          </div>
+          <div id="previewUser"
+            class="min-h-[40px] bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
+            <span class="text-gray-300 dark:text-gray-700 not-italic font-sans text-xs">No user message yet…</span>
+          </div>
+        </div>
+        <!-- JSON view toggle -->
+        <div>
+          <button id="jsonToggle"
+            class="text-xs text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 transition-colors font-medium flex items-center gap-1">
+            <span id="jsonArrow">▶</span> View as JSON
+          </button>
+          <pre id="jsonView"
+            class="hidden mt-2 bg-gray-950 dark:bg-black rounded-lg p-3 text-green-400 dark:text-green-500 text-xs overflow-x-auto leading-relaxed"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <footer class="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 py-1.5 flex items-center justify-between text-xs text-gray-400 dark:text-gray-600">
+    <span id="statusMsg" class="fade-in">Ready</span>
+    <span>Token estimates are approximate (÷4 heuristic)</span>
+  </footer>
+</div>
+
+<!-- Toast -->
+<div id="toast"
+  class="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium shadow-lg opacity-0 pointer-events-none transition-opacity duration-200 z-50">
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+const CONTEXT_LIMIT = 200000;
+let variables = [];  // [{ id, key, value }]
+let varIdCounter = 0;
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const systemPromptEl  = document.getElementById('systemPrompt');
+const userMessageEl   = document.getElementById('userMessage');
+const variablesListEl = document.getElementById('variablesList');
+const detectedTagsEl  = document.getElementById('detectedVarTags');
+const previewSystemEl = document.getElementById('previewSystem');
+const previewUserEl   = document.getElementById('previewUser');
+const sysTokensEl     = document.getElementById('sysTokens');
+const userTokensEl    = document.getElementById('userTokens');
+const totalTokensEl   = document.getElementById('totalTokens');
+const tokenBarEl      = document.getElementById('tokenBar');
+const tokenPctEl      = document.getElementById('tokenPct');
+const jsonViewEl      = document.getElementById('jsonView');
+const statusMsgEl     = document.getElementById('statusMsg');
+const toastEl         = document.getElementById('toast');
+
+// ─── Token estimation ─────────────────────────────────────────────────────────
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
+// ─── Variable extraction ──────────────────────────────────────────────────────
+function extractVarNames(text) {
+  const matches = text.matchAll(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g);
+  return [...new Set([...matches].map(m => m[1]))];
+}
+
+// ─── Apply variable substitution & highlight ──────────────────────────────────
+function applyVars(text) {
+  const varMap = {};
+  variables.forEach(v => { if (v.key.trim()) varMap[v.key.trim()] = v.value; });
+  return text.replace(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g, (match, name) => {
+    return varMap[name] !== undefined ? varMap[name] : match;
+  });
+}
+
+function htmlHighlight(text) {
+  const varMap = {};
+  variables.forEach(v => { if (v.key.trim()) varMap[v.key.trim()] = v.value; });
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return escaped.replace(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g, (match, name) => {
+    if (varMap[name] !== undefined && varMap[name] !== '') {
+      const val = varMap[name].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<span class="var-highlight" title="${name}">${val}</span>`;
+    }
+    return `<span class="missing-var" title="No value for '${name}'">${match}</span>`;
+  });
+}
+
+// ─── Render preview ───────────────────────────────────────────────────────────
+function renderPreview() {
+  const sys  = systemPromptEl.value;
+  const usr  = userMessageEl.value;
+  const sysT = estimateTokens(applyVars(sys));
+  const usrT = estimateTokens(applyVars(usr));
+  const total = sysT + usrT;
+
+  sysTokensEl.textContent  = `${sysT.toLocaleString()} tokens`;
+  userTokensEl.textContent = `${usrT.toLocaleString()} tokens`;
+  totalTokensEl.textContent = `${total.toLocaleString()} tokens`;
+
+  const pct = Math.min((total / CONTEXT_LIMIT) * 100, 100);
+  tokenPctEl.textContent  = `${pct.toFixed(1)}%`;
+  tokenBarEl.style.width  = `${pct}%`;
+  tokenBarEl.className = `token-bar h-full rounded-full ${
+    pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : 'bg-violet-500'
+  }`;
+
+  if (sys.trim()) {
+    previewSystemEl.innerHTML = htmlHighlight(sys);
+  } else {
+    previewSystemEl.innerHTML = '<span class="text-gray-300 dark:text-gray-700 not-italic font-sans text-xs">No system prompt yet…</span>';
+  }
+  if (usr.trim()) {
+    previewUserEl.innerHTML = htmlHighlight(usr);
+  } else {
+    previewUserEl.innerHTML = '<span class="text-gray-300 dark:text-gray-700 not-italic font-sans text-xs">No user message yet…</span>';
+  }
+
+  // JSON view
+  const json = JSON.stringify([
+    { role: 'system', content: applyVars(sys) },
+    { role: 'user',   content: applyVars(usr)  },
+  ], null, 2);
+  jsonViewEl.textContent = json;
+
+  // Detected vars
+  const allVarNames = extractVarNames(sys + '\n' + usr);
+  const definedKeys = new Set(variables.map(v => v.key.trim()).filter(Boolean));
+  detectedTagsEl.innerHTML = allVarNames.length === 0
+    ? '<span class="text-xs text-gray-300 dark:text-gray-700">None detected</span>'
+    : allVarNames.map(name => {
+        const defined = definedKeys.has(name);
+        return `<span class="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer transition-colors ${
+          defined
+            ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400'
+            : 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400'
+        }" title="${defined ? 'Defined' : 'Missing — click to add'}"
+          onclick="${defined ? '' : `addVarByName('${name}')`}"
+        >{{${name}}}</span>`;
+      }).join('');
+}
+
+// ─── Variables panel ──────────────────────────────────────────────────────────
+function renderVariables() {
+  variablesListEl.innerHTML = '';
+  variables.forEach(v => {
+    const row = document.createElement('div');
+    row.className = 'flex gap-2 items-start fade-in';
+    row.innerHTML = `
+      <div class="flex-1 flex flex-col gap-1">
+        <input type="text" placeholder="name" value="${escHtml(v.key)}"
+          class="w-full text-xs font-mono border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          oninput="updateVar(${v.id}, 'key', this.value)" />
+        <textarea placeholder="value" rows="2"
+          class="w-full text-xs font-mono border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-violet-500"
+          oninput="updateVar(${v.id}, 'value', this.value)">${escHtml(v.value)}</textarea>
+      </div>
+      <button onclick="removeVar(${v.id})"
+        class="mt-1 text-gray-300 dark:text-gray-700 hover:text-red-400 dark:hover:text-red-500 transition-colors text-lg leading-none">×</button>`;
+    variablesListEl.appendChild(row);
+  });
+  renderPreview();
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function addVar(key = '', value = '') {
+  variables.push({ id: ++varIdCounter, key, value });
+  renderVariables();
+}
+
+window.addVarByName = function(name) {
+  if (!variables.find(v => v.key === name)) addVar(name, '');
+  renderVariables();
+};
+
+window.updateVar = function(id, field, val) {
+  const v = variables.find(x => x.id === id);
+  if (v) { v[field] = val; renderPreview(); }
+};
+
+window.removeVar = function(id) {
+  variables = variables.filter(x => x.id !== id);
+  renderVariables();
+};
+
+document.getElementById('addVarBtn').addEventListener('click', () => addVar());
+
+// ─── Templates ────────────────────────────────────────────────────────────────
+const TEMPLATES = {
+  rag: {
+    system: `You are a knowledgeable assistant. Use ONLY the provided context to answer the user's question.
+If the answer is not found in the context, say "I don't have enough information to answer that."
+
+Context:
+{{context}}`,
+    user: `{{question}}`,
+    vars: [
+      { key: 'context', value: 'The Eiffel Tower was built between 1887 and 1889 in Paris, France. It was designed by engineer Gustave Eiffel.' },
+      { key: 'question', value: 'When was the Eiffel Tower built?' },
+    ],
+  },
+  classifier: {
+    system: `You are an intent classification system. Given a user message, respond with a JSON object with two fields:
+- "intent": one of [{{intents}}]
+- "confidence": a number from 0.0 to 1.0
+
+Respond ONLY with valid JSON. No explanation.`,
+    user: `{{user_input}}`,
+    vars: [
+      { key: 'intents', value: 'greeting, question, complaint, purchase, goodbye' },
+      { key: 'user_input', value: 'Hi there! Can you help me track my order?' },
+    ],
+  },
+  extractor: {
+    system: `Extract structured data from the provided text.
+Return a JSON object with these fields: {{fields}}.
+If a field cannot be determined, use null.
+Respond ONLY with valid JSON.`,
+    user: `Extract from the following text:\n\n{{text}}`,
+    vars: [
+      { key: 'fields', value: 'name, email, phone, company' },
+      { key: 'text', value: 'Hello, I am Jane Smith from Acme Corp. You can reach me at jane@acme.com or 555-1234.' },
+    ],
+  },
+  cot: {
+    system: `You are a careful reasoner. When solving problems:
+1. Break the problem into clear steps
+2. Reason through each step explicitly
+3. State any assumptions
+4. Provide your final answer after the reasoning
+
+Always structure your response as:
+<thinking>
+[step-by-step reasoning]
+</thinking>
+<answer>
+[final answer]
+</answer>`,
+    user: `{{problem}}`,
+    vars: [
+      { key: 'problem', value: 'A train leaves City A at 9am traveling at 60mph. Another train leaves City B (300 miles away) at 10am traveling at 90mph toward City A. At what time do they meet?' },
+    ],
+  },
+};
+
+document.getElementById('templateSelect').addEventListener('change', function() {
+  const tpl = TEMPLATES[this.value];
+  if (!tpl) return;
+  systemPromptEl.value = tpl.system;
+  userMessageEl.value  = tpl.user;
+  variables = [];
+  varIdCounter = 0;
+  tpl.vars.forEach(v => variables.push({ id: ++varIdCounter, key: v.key, value: v.value }));
+  renderVariables();
+  setStatus(`Loaded "${this.options[this.selectedIndex].text}" template`);
+  this.value = '';
+});
+
+// ─── Save / Load ──────────────────────────────────────────────────────────────
+function getState() {
+  return { system: systemPromptEl.value, user: userMessageEl.value, variables };
+}
+
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const saves = JSON.parse(localStorage.getItem('promptBuilderSaves') || '[]');
+  const name = `Save ${new Date().toLocaleTimeString()}`;
+  saves.unshift({ name, state: getState(), ts: Date.now() });
+  localStorage.setItem('promptBuilderSaves', JSON.stringify(saves.slice(0, 20)));
+  showToast('Saved to local storage');
+  setStatus(`Saved: ${name}`);
+});
+
+// Auto-save to draft
+let autoSaveTimer;
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    localStorage.setItem('promptBuilderDraft', JSON.stringify(getState()));
+  }, 800);
+}
+
+// Restore draft on load
+function restoreDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem('promptBuilderDraft') || 'null');
+    if (!draft) return;
+    systemPromptEl.value = draft.system || '';
+    userMessageEl.value  = draft.user || '';
+    variables = (draft.variables || []).map(v => ({ ...v, id: ++varIdCounter }));
+    renderVariables();
+    setStatus('Restored draft');
+  } catch {}
+}
+
+// ─── Copy ──────────────────────────────────────────────────────────────────────
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const sys = applyVars(systemPromptEl.value);
+  const usr = applyVars(userMessageEl.value);
+  const text = `[SYSTEM]\n${sys}\n\n[USER]\n${usr}`;
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
+});
+
+// ─── JSON toggle ──────────────────────────────────────────────────────────────
+let jsonOpen = false;
+document.getElementById('jsonToggle').addEventListener('click', () => {
+  jsonOpen = !jsonOpen;
+  jsonViewEl.classList.toggle('hidden', !jsonOpen);
+  document.getElementById('jsonArrow').textContent = jsonOpen ? '▼' : '▶';
+  document.getElementById('jsonToggle').querySelector('span:last-child') ||
+    document.getElementById('jsonToggle').lastChild;
+});
+
+// ─── Dark mode ────────────────────────────────────────────────────────────────
+const html = document.documentElement;
+const themeIcon = document.getElementById('themeIcon');
+
+function applyTheme(dark) {
+  html.classList.toggle('dark', dark);
+  themeIcon.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('promptBuilderTheme', dark ? 'dark' : 'light');
+}
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  applyTheme(!html.classList.contains('dark'));
+});
+
+// Init theme
+const savedTheme = localStorage.getItem('promptBuilderTheme');
+if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+  applyTheme(true);
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.style.opacity = '0'; }, 2000);
+}
+
+function setStatus(msg) {
+  statusMsgEl.textContent = msg;
+}
+
+// ─── Event listeners ──────────────────────────────────────────────────────────
+systemPromptEl.addEventListener('input', () => { renderPreview(); scheduleAutoSave(); });
+userMessageEl.addEventListener('input',  () => { renderPreview(); scheduleAutoSave(); });
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+restoreDraft();
+if (!systemPromptEl.value && !userMessageEl.value) {
+  // Load default template
+  const tpl = TEMPLATES.rag;
+  systemPromptEl.value = tpl.system;
+  userMessageEl.value  = tpl.user;
+  tpl.vars.forEach(v => variables.push({ id: ++varIdCounter, key: v.key, value: v.value }));
+}
+renderVariables();
+</script>
+</body>
+</html>
